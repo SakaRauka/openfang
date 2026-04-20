@@ -1,11 +1,11 @@
 //! HTTP client for the memory-api gateway.
 //!
-//! Provides a blocking HTTP client that routes `remember` and `recall` operations
-//! to the shared memory-api service (PostgreSQL + pgvector + Jina AI embeddings).
-//! Designed to be called from synchronous SemanticStore methods within
-//! `spawn_blocking` contexts.
+//! Provides an async HTTP client that routes `remember` and `recall` operations
+//! to the shared memory-api service. Uses tokio::task::spawn_blocking for
+//! synchronous callers.
 
 use serde::{Deserialize, Serialize};
+use std::sync::Arc;
 use tracing::{debug, warn};
 
 /// Error type for memory API operations.
@@ -26,7 +26,7 @@ pub enum MemoryApiError {
 pub struct MemoryApiClient {
     base_url: String,
     token: String,
-    client: reqwest::blocking::Client,
+    client: Arc<reqwest::Client>,
 }
 
 // -- Request/Response types matching memory-api endpoints --
@@ -100,9 +100,9 @@ impl MemoryApiClient {
             })
         };
 
-        let client = reqwest::blocking::Client::builder()
+        let client = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(30))
-            .user_agent("openfang-memory/0.4")
+            .user_agent("openfang-memory/0.5")
             .build()
             .map_err(|e| MemoryApiError::Http(e.to_string()))?;
 
@@ -111,28 +111,30 @@ impl MemoryApiClient {
         Ok(Self {
             base_url,
             token,
-            client,
+            client: Arc::new(client),
         })
     }
 
-    /// Check if memory-api is reachable.
-    pub fn health_check(&self) -> Result<(), MemoryApiError> {
+    /// Check if memory-api is reachable (async).
+    pub async fn health_check_async(&self) -> Result<(), MemoryApiError> {
         let url = format!("{}/health", self.base_url);
         let resp = self
             .client
             .get(&url)
             .send()
+            .await
             .map_err(|e| MemoryApiError::Http(e.to_string()))?;
 
         if !resp.status().is_success() {
             return Err(MemoryApiError::Api {
                 status: resp.status().as_u16(),
-                message: resp.text().unwrap_or_default(),
+                message: resp.text().await.unwrap_or_default(),
             });
         }
 
         let body: HealthResponse = resp
             .json()
+            .await
             .map_err(|e| MemoryApiError::Parse(e.to_string()))?;
 
         if body.status != "ok" {
@@ -146,10 +148,22 @@ impl MemoryApiClient {
         Ok(())
     }
 
-    /// Store a memory via POST /memory/store.
+    /// Check if memory-api is reachable (blocking wrapper).
+    pub fn health_check(&self) -> Result<(), MemoryApiError> {
+        let client = self.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(client.health_check_async())
+        })
+        .join()
+        .map_err(|_| MemoryApiError::Http("health_check thread panicked".into()))?
+    }
+
+    /// Store a memory via POST /memory/store (async).
     ///
     /// The memory-api handles embedding generation (Jina AI) and deduplication.
-    pub fn store(
+    pub async fn store_async(
         &self,
         content: &str,
         category: Option<&str>,
@@ -176,11 +190,12 @@ impl MemoryApiClient {
 
         let resp = req
             .send()
+            .await
             .map_err(|e| MemoryApiError::Http(e.to_string()))?;
         let status = resp.status().as_u16();
 
         if status != 200 && status != 201 {
-            let body_text = resp.text().unwrap_or_default();
+            let body_text = resp.text().await.unwrap_or_default();
             return Err(MemoryApiError::Api {
                 status,
                 message: body_text,
@@ -189,6 +204,7 @@ impl MemoryApiClient {
 
         let result: StoreResponse = resp
             .json()
+            .await
             .map_err(|e| MemoryApiError::Parse(e.to_string()))?;
 
         debug!(
@@ -200,10 +216,43 @@ impl MemoryApiClient {
         Ok(result)
     }
 
-    /// Search memories via POST /memory/search.
+    /// Store a memory (blocking wrapper).
+    pub fn store(
+        &self,
+        content: &str,
+        category: Option<&str>,
+        agent_id: Option<&str>,
+        source: Option<&str>,
+        importance: Option<u8>,
+        tags: Option<Vec<String>>,
+    ) -> Result<StoreResponse, MemoryApiError> {
+        let client = self.clone();
+        let content = content.to_string();
+        let category = category.map(|s| s.to_string());
+        let agent_id = agent_id.map(|s| s.to_string());
+        let source = source.map(|s| s.to_string());
+        let tags = tags.clone();
+        
+        std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(client.store_async(
+                    &content,
+                    category.as_deref(),
+                    agent_id.as_deref(),
+                    source.as_deref(),
+                    importance,
+                    tags,
+                ))
+        })
+        .join()
+        .map_err(|_| MemoryApiError::Http("store thread panicked".into()))?
+    }
+
+    /// Search memories via POST /memory/search (async).
     ///
     /// The memory-api handles embedding the query (Jina AI) and hybrid vector+BM25 search.
-    pub fn search(
+    pub async fn search_async(
         &self,
         query: &str,
         limit: usize,
@@ -224,11 +273,12 @@ impl MemoryApiClient {
 
         let resp = req
             .send()
+            .await
             .map_err(|e| MemoryApiError::Http(e.to_string()))?;
         let status = resp.status().as_u16();
 
         if status != 200 {
-            let body_text = resp.text().unwrap_or_default();
+            let body_text = resp.text().await.unwrap_or_default();
             return Err(MemoryApiError::Api {
                 status,
                 message: body_text,
@@ -237,10 +287,31 @@ impl MemoryApiClient {
 
         let result: SearchResponse = resp
             .json()
+            .await
             .map_err(|e| MemoryApiError::Parse(e.to_string()))?;
 
         debug!(count = result.count, "Searched memories via HTTP");
 
         Ok(result.results)
+    }
+
+    /// Search memories (blocking wrapper).
+    pub fn search(
+        &self,
+        query: &str,
+        limit: usize,
+        category: Option<&str>,
+    ) -> Result<Vec<SearchResult>, MemoryApiError> {
+        let client = self.clone();
+        let query = query.to_string();
+        let category = category.map(|s| s.to_string());
+        
+        std::thread::spawn(move || {
+            tokio::runtime::Runtime::new()
+                .unwrap()
+                .block_on(client.search_async(&query, limit, category.as_deref()))
+        })
+        .join()
+        .map_err(|_| MemoryApiError::Http("search thread panicked".into()))?
     }
 }
