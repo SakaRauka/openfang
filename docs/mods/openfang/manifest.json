@@ -1,0 +1,33 @@
+{
+  "version": "1.0",
+  "created": "2026-04-18",
+  "patches": [
+    {
+      "file": "crates/openfang-memory/src/http_client.rs",
+      "patch": "diffs/http_client.patch",
+      "reason": "Fix panic on startup - replace reqwest::blocking::Client with async reqwest::Client",
+      "description": "OpenFang crashed when backend=http because reqwest::blocking::Client was created inside async context. Changed to async client with thread-based blocking wrappers."
+    },
+    {
+      "file": "crates/openfang-memory/Cargo.toml",
+      "patch": "diffs/memory_Cargo.patch",
+      "reason": "Remove 'blocking' feature from reqwest dependency",
+      "description": "No longer needed after http_client.rs changes"
+    }
+  ],
+  "config": {
+    "backend": "http",
+    "http_url": "http://127.0.0.1:5010",
+    "http_token_env": ""
+  },
+  "tested": {
+    "date": "2026-04-18",
+    "result": "HTTP memory backend connected successfully"
+  },
+  "network": {
+    "date": "2026-04-18",
+    "change": "api_listen = '0.0.0.0:8081' for LAN access",
+    "doc": "settings/NETWORK_BIND.md",
+    "verified": "http://192.168.1.200:8081/api/health returns OK"
+  }
+}
