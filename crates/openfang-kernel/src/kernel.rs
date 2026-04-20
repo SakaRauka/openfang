@@ -851,7 +851,7 @@ impl OpenFangKernel {
         }
 
         // Initialize hand registry (curated autonomous packages)
-        let hand_registry = openfang_hands::registry::HandRegistry::new();
+        let hand_registry = openfang_hands::registry::HandRegistry::new_with_home(config.home_dir.clone());
         let hand_count = hand_registry.load_bundled();
         if hand_count > 0 {
             info!("Loaded {hand_count} bundled hand(s)");

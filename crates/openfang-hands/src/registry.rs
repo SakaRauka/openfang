@@ -9,6 +9,7 @@ use dashmap::DashMap;
 use openfang_types::agent::AgentId;
 use serde::Serialize;
 use std::collections::HashMap;
+use std::path::PathBuf;
 use tracing::{info, warn};
 use uuid::Uuid;
 
@@ -41,6 +42,8 @@ pub struct HandRegistry {
     definitions: DashMap<String, HandDefinition>,
     /// Active hand instances, keyed by instance UUID.
     instances: DashMap<Uuid, HandInstance>,
+    /// Home directory for persisting hands (respects OPENFANG_HOME).
+    home_dir: Option<PathBuf>,
 }
 
 impl HandRegistry {
@@ -49,6 +52,16 @@ impl HandRegistry {
         Self {
             definitions: DashMap::new(),
             instances: DashMap::new(),
+            home_dir: None,
+        }
+    }
+
+    /// Create a registry with a specific home directory (respects OPENFANG_HOME).
+    pub fn new_with_home(home_dir: PathBuf) -> Self {
+        Self {
+            definitions: DashMap::new(),
+            instances: DashMap::new(),
+            home_dir: Some(home_dir),
         }
     }
 
@@ -213,8 +226,13 @@ impl HandRegistry {
         // memory and the user gets a working install for the current
         // session. On next restart, `load_workspace_hands` will pick it up
         // from disk.
-        if let Some(home) = dirs::home_dir() {
-            let dest_dir = home.join(".openfang").join("hands").join(&def.id);
+        let hands_base = self.home_dir.clone().or_else(|| {
+            std::env::var("OPENFANG_HOME").ok().map(PathBuf::from).or_else(|| {
+                dirs::home_dir().map(|h| h.join(".openfang"))
+            })
+        });
+        if let Some(base) = hands_base {
+            let dest_dir = base.join("hands").join(&def.id);
             // Canonicalize both paths before comparing so we don't re-copy a
             // hand that is already being installed from its persistent
             // location (e.g. `openfang hand install ~/.openfang/hands/foo`).

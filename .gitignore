@@ -48,3 +48,12 @@ Thumbs.db
 
 # Personal deploy scripts
 scripts/deploy-remote.sh
+
+# MAIRA local artifacts
+agents/kira/
+agents/mira/
+agents/scraper/
+dev_start.sh
+mods/
+openfang_dev.log
+profile/
