@@ -50,10 +50,13 @@ Thumbs.db
 scripts/deploy-remote.sh
 
 # MAIRA local artifacts
+agents/aira/
+agents/githuber/
 agents/kira/
 agents/mira/
 agents/scraper/
 dev_start.sh
+docs/mods/
 mods/
 openfang_dev.log
 profile/
