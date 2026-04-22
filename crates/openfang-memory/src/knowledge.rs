@@ -2,6 +2,7 @@
 //!
 //! Stores entities and relations with support for graph pattern queries.
 
+use crate::http_client::MemoryApiClient;
 use chrono::Utc;
 use openfang_types::error::{OpenFangError, OpenFangResult};
 use openfang_types::memory::{
@@ -12,22 +13,44 @@ use std::collections::HashMap;
 use std::sync::{Arc, Mutex};
 use uuid::Uuid;
 
-/// Knowledge graph store backed by SQLite.
+/// Knowledge graph store backed by SQLite or HTTP.
 #[derive(Clone)]
 pub struct KnowledgeStore {
-    conn: Arc<Mutex<Connection>>,
+    conn: Option<Arc<Mutex<Connection>>>,
+    http_client: Option<MemoryApiClient>,
 }
 
 impl KnowledgeStore {
     /// Create a new knowledge store wrapping the given connection.
     pub fn new(conn: Arc<Mutex<Connection>>) -> Self {
-        Self { conn }
+        Self {
+            conn: Some(conn),
+            http_client: None,
+        }
+    }
+
+    /// Create a new knowledge store using an HTTP client.
+    pub fn new_http(client: MemoryApiClient) -> Self {
+        Self {
+            conn: None,
+            http_client: Some(client),
+        }
     }
 
     /// Add an entity to the knowledge graph.
     pub fn add_entity(&self, entity: Entity) -> OpenFangResult<String> {
+        if let Some(ref client) = self.http_client {
+            let etype = serde_json::to_value(&entity.entity_type)
+                .map_err(|e| OpenFangError::Serialization(e.to_string()))?;
+            return client
+                .graph_entity_add(entity.id, etype, entity.name, entity.properties)
+                .map_err(|e| OpenFangError::Memory(e.to_string()));
+        }
+
         let conn = self
             .conn
+            .as_ref()
+            .ok_or_else(|| OpenFangError::Internal("No database connection".into()))?
             .lock()
             .map_err(|e| OpenFangError::Internal(e.to_string()))?;
         let id = if entity.id.is_empty() {
@@ -52,8 +75,24 @@ impl KnowledgeStore {
 
     /// Add a relation between two entities.
     pub fn add_relation(&self, relation: Relation) -> OpenFangResult<String> {
+        if let Some(ref client) = self.http_client {
+            let rel_type = serde_json::to_value(&relation.relation)
+                .map_err(|e| OpenFangError::Serialization(e.to_string()))?;
+            return client
+                .graph_relation_add(
+                    relation.source,
+                    rel_type,
+                    relation.target,
+                    relation.properties,
+                    relation.confidence,
+                )
+                .map_err(|e| OpenFangError::Memory(e.to_string()));
+        }
+
         let conn = self
             .conn
+            .as_ref()
+            .ok_or_else(|| OpenFangError::Internal("No database connection".into()))?
             .lock()
             .map_err(|e| OpenFangError::Internal(e.to_string()))?;
         let id = Uuid::new_v4().to_string();
@@ -81,8 +120,33 @@ impl KnowledgeStore {
 
     /// Query the knowledge graph with a pattern.
     pub fn query_graph(&self, pattern: GraphPattern) -> OpenFangResult<Vec<GraphMatch>> {
+        if let Some(ref client) = self.http_client {
+            let rel_type = if let Some(ref r) = pattern.relation {
+                Some(
+                    serde_json::to_value(r)
+                        .map_err(|e| OpenFangError::Serialization(e.to_string()))?,
+                )
+            } else {
+                None
+            };
+
+            let results = client
+                .graph_query(pattern.source, rel_type, pattern.target)
+                .map_err(|e| OpenFangError::Memory(e.to_string()))?;
+
+            let mut matches = Vec::new();
+            for r in results {
+                let m: GraphMatch = serde_json::from_value(r)
+                    .map_err(|e| OpenFangError::Serialization(e.to_string()))?;
+                matches.push(m);
+            }
+            return Ok(matches);
+        }
+
         let conn = self
             .conn
+            .as_ref()
+            .ok_or_else(|| OpenFangError::Internal("No database connection".into()))?
             .lock()
             .map_err(|e| OpenFangError::Internal(e.to_string()))?;
 

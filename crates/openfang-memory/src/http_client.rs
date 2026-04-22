@@ -85,6 +85,35 @@ struct HealthResponse {
     pub status: String,
 }
 
+#[derive(Serialize)]
+struct GraphEntityRequest {
+    pub id: String,
+    pub entity_type: serde_json::Value,
+    pub name: String,
+    pub properties: std::collections::HashMap<String, serde_json::Value>,
+}
+
+#[derive(Serialize)]
+struct GraphRelationRequest {
+    pub source: String,
+    pub relation: serde_json::Value,
+    pub target: String,
+    pub properties: std::collections::HashMap<String, serde_json::Value>,
+    pub confidence: f32,
+}
+
+#[derive(Serialize)]
+struct GraphQueryRequest {
+    pub source: Option<String>,
+    pub relation: Option<serde_json::Value>,
+    pub target: Option<String>,
+}
+
+#[derive(Deserialize, Debug)]
+pub struct GraphQueryResponse {
+    pub results: Vec<serde_json::Value>,
+}
+
 impl MemoryApiClient {
     /// Create a new memory-api HTTP client.
     ///
@@ -313,5 +342,118 @@ impl MemoryApiClient {
         })
         .join()
         .map_err(|_| MemoryApiError::Http("search thread panicked".into()))?
+    }
+
+    // -- Graph Operations --
+
+    pub async fn graph_entity_add_async(
+        &self,
+        id: String,
+        entity_type: serde_json::Value,
+        name: String,
+        properties: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<String, MemoryApiError> {
+        let url = format!("{}/memory/graph/entity", self.base_url);
+        let body = GraphEntityRequest { id, entity_type, name, properties };
+        
+        let resp = self.client.post(&url).json(&body).send().await
+            .map_err(|e| MemoryApiError::Http(e.to_string()))?;
+        
+        if !resp.status().is_success() {
+            return Err(MemoryApiError::Api {
+                status: resp.status().as_u16(),
+                message: resp.text().await.unwrap_or_default(),
+            });
+        }
+        
+        let res: serde_json::Value = resp.json().await.map_err(|e| MemoryApiError::Parse(e.to_string()))?;
+        Ok(res["id"].as_str().unwrap_or_default().to_string())
+    }
+
+    pub fn graph_entity_add(
+        &self,
+        id: String,
+        entity_type: serde_json::Value,
+        name: String,
+        properties: std::collections::HashMap<String, serde_json::Value>,
+    ) -> Result<String, MemoryApiError> {
+        let client = self.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Runtime::new().unwrap().block_on(client.graph_entity_add_async(id, entity_type, name, properties))
+        }).join().map_err(|_| MemoryApiError::Http("thread panic".into()))?
+    }
+
+    pub async fn graph_relation_add_async(
+        &self,
+        source: String,
+        relation: serde_json::Value,
+        target: String,
+        properties: std::collections::HashMap<String, serde_json::Value>,
+        confidence: f32,
+    ) -> Result<String, MemoryApiError> {
+        let url = format!("{}/memory/graph/relation", self.base_url);
+        let body = GraphRelationRequest { source, relation, target, properties, confidence };
+        
+        let resp = self.client.post(&url).json(&body).send().await
+            .map_err(|e| MemoryApiError::Http(e.to_string()))?;
+        
+        if !resp.status().is_success() {
+            return Err(MemoryApiError::Api {
+                status: resp.status().as_u16(),
+                message: resp.text().await.unwrap_or_default(),
+            });
+        }
+        
+        let res: serde_json::Value = resp.json().await.map_err(|e| MemoryApiError::Parse(e.to_string()))?;
+        Ok(res["id"].as_str().unwrap_or_default().to_string())
+    }
+
+    pub fn graph_relation_add(
+        &self,
+        source: String,
+        relation: serde_json::Value,
+        target: String,
+        properties: std::collections::HashMap<String, serde_json::Value>,
+        confidence: f32,
+    ) -> Result<String, MemoryApiError> {
+        let client = self.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Runtime::new().unwrap().block_on(client.graph_relation_add_async(source, relation, target, properties, confidence))
+        }).join().map_err(|_| MemoryApiError::Http("thread panic".into()))?
+    }
+
+    pub async fn graph_query_async(
+        &self,
+        source: Option<String>,
+        relation: Option<serde_json::Value>,
+        target: Option<String>,
+    ) -> Result<Vec<serde_json::Value>, MemoryApiError> {
+        let url = format!("{}/memory/graph/query", self.base_url);
+        let body = GraphQueryRequest { source, relation, target };
+        
+        let resp = self.client.post(&url).json(&body).send().await
+            .map_err(|e| MemoryApiError::Http(e.to_string()))?;
+        
+        if !resp.status().is_success() {
+            return Err(MemoryApiError::Api {
+                status: resp.status().as_u16(),
+                message: resp.text().await.unwrap_or_default(),
+            });
+        }
+        
+        let res: GraphQueryResponse = resp.json().await.map_err(|e| MemoryApiError::Parse(e.to_string()))?;
+        Ok(res.results)
+    }
+
+    pub fn graph_query(
+        &self,
+        source: Option<String>,
+        relation: Option<serde_json::Value>,
+        target: Option<String>,
+    ) -> Result<Vec<serde_json::Value>, MemoryApiError> {
+        let client = self.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Runtime::new().unwrap().block_on(client.graph_query_async(source, relation, target))
+        }).join().map_err(|_| MemoryApiError::Http("thread panic".into()))?
     }
 }

@@ -54,13 +54,52 @@ impl MemorySubstrate {
         run_migrations(&conn).map_err(|e| OpenFangError::Memory(e.to_string()))?;
         let shared = Arc::new(Mutex::new(conn));
 
-        let semantic = Self::create_semantic_store(Arc::clone(&shared), memory_config);
+        #[cfg(feature = "http-memory")]
+        let (semantic, knowledge) = if memory_config.backend == "http" {
+            if let (Some(url), Some(token_env)) =
+                (&memory_config.http_url, &memory_config.http_token_env)
+            {
+                match crate::http_client::MemoryApiClient::new(url, token_env) {
+                    Ok(client) => {
+                        info!(url = url, "Using HTTP memory backend");
+                        (
+                            SemanticStore::new_with_http(Arc::clone(&shared), client.clone()),
+                            KnowledgeStore::new_http(client),
+                        )
+                    }
+                    Err(e) => {
+                        warn!(error = %e, "Failed to create HTTP memory client, falling back to SQLite");
+                        (
+                            SemanticStore::new(Arc::clone(&shared)),
+                            KnowledgeStore::new(Arc::clone(&shared)),
+                        )
+                    }
+                }
+            } else {
+                warn!("HTTP memory backend configured but url/token missing, falling back to SQLite");
+                (
+                    SemanticStore::new(Arc::clone(&shared)),
+                    KnowledgeStore::new(Arc::clone(&shared)),
+                )
+            }
+        } else {
+            (
+                SemanticStore::new(Arc::clone(&shared)),
+                KnowledgeStore::new(Arc::clone(&shared)),
+            )
+        };
+
+        #[cfg(not(feature = "http-memory"))]
+        let (semantic, knowledge) = (
+            SemanticStore::new(Arc::clone(&shared)),
+            KnowledgeStore::new(Arc::clone(&shared)),
+        );
 
         Ok(Self {
             conn: Arc::clone(&shared),
             structured: StructuredStore::new(Arc::clone(&shared)),
             semantic,
-            knowledge: KnowledgeStore::new(Arc::clone(&shared)),
+            knowledge,
             sessions: SessionStore::new(Arc::clone(&shared)),
             usage: UsageStore::new(Arc::clone(&shared)),
             consolidation: ConsolidationEngine::new(shared, decay_rate),
