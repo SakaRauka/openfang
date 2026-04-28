@@ -375,7 +375,7 @@ pub struct HandDefinition {
     /// Skill allowlist for the spawned agent (empty = all).
     #[serde(default)]
     pub skills: Vec<String>,
-    /// MCP server allowlist for the spawned agent (empty = all).
+    /// MCP server allowlist for the spawned agent (empty = none).
     #[serde(default)]
     pub mcp_servers: Vec<String>,
     /// Requirements that must be satisfied before activation.

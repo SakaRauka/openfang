@@ -1418,7 +1418,7 @@ pub async fn get_agent(
             "skills": entry.manifest.skills,
             "skills_mode": if entry.manifest.skills.is_empty() { "all" } else { "allowlist" },
             "mcp_servers": entry.manifest.mcp_servers,
-            "mcp_servers_mode": if entry.manifest.mcp_servers.is_empty() { "all" } else { "allowlist" },
+            "mcp_servers_mode": if entry.manifest.mcp_servers.is_empty() { "none" } else { "allowlist" },
             "fallback_models": entry.manifest.fallback_models,
         })),
     )
@@ -7356,7 +7356,7 @@ pub async fn get_agent_mcp_servers(
         }
     }
     let mode = if entry.manifest.mcp_servers.is_empty() {
-        "all"
+        "none"
     } else {
         "allowlist"
     };

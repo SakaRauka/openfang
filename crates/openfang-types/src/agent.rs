@@ -456,7 +456,7 @@ pub struct AgentManifest {
     /// Installed skill references (empty = all skills available).
     #[serde(default, deserialize_with = "crate::serde_compat::vec_lenient")]
     pub skills: Vec<String>,
-    /// MCP server allowlist (empty = all connected MCP servers available).
+    /// MCP server allowlist (empty = no MCP servers available).
     #[serde(default, deserialize_with = "crate::serde_compat::vec_lenient")]
     pub mcp_servers: Vec<String>,
     /// Custom metadata.

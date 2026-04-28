@@ -3163,7 +3163,7 @@ impl OpenFangKernel {
         Ok(())
     }
 
-    /// Update an agent's MCP server allowlist. Empty = all servers (backward compat).
+    /// Update an agent's MCP server allowlist. Empty = no MCP servers.
     pub fn set_agent_mcp_servers(
         &self,
         agent_id: AgentId,
