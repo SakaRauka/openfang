@@ -1931,8 +1931,7 @@ impl OpenFangKernel {
 
         // Build the structured system prompt via prompt_builder
         {
-            let mcp_tool_count = self.mcp_tools.lock().map(|t| t.len()).unwrap_or(0);
-            let shared_id = shared_memory_agent_id();
+                let shared_id = shared_memory_agent_id();
             let user_name = self
                 .memory
                 .structured_get(shared_id, "user_name")
@@ -1964,7 +1963,7 @@ impl OpenFangKernel {
                     &skill_snapshot,
                     &manifest.skills,
                 ),
-                mcp_summary: if mcp_tool_count > 0 {
+                mcp_summary: if !manifest.mcp_servers.is_empty() {
                     self.build_mcp_summary(&manifest.mcp_servers)
                 } else {
                     String::new()
@@ -2498,8 +2497,7 @@ impl OpenFangKernel {
 
         // Build the structured system prompt via prompt_builder
         {
-            let mcp_tool_count = self.mcp_tools.lock().map(|t| t.len()).unwrap_or(0);
-            let shared_id = shared_memory_agent_id();
+                let shared_id = shared_memory_agent_id();
             let user_name = self
                 .memory
                 .structured_get(shared_id, "user_name")
@@ -2531,7 +2529,7 @@ impl OpenFangKernel {
                     &skill_snapshot,
                     &manifest.skills,
                 ),
-                mcp_summary: if mcp_tool_count > 0 {
+                mcp_summary: if !manifest.mcp_servers.is_empty() {
                     self.build_mcp_summary(&manifest.mcp_servers)
                 } else {
                     String::new()
@@ -5611,8 +5609,12 @@ impl OpenFangKernel {
         // Step 3: Add MCP tools (filtered by agent's MCP server allowlist,
         // then by declared tools).
         if let Ok(mcp_tools) = self.mcp_tools.lock() {
+            // Empty mcp_allowlist means the agent has NOT opted into any MCP
+            // servers — it should receive NO MCP tools (opt-in model).
+            // Previously, empty = all MCP tools were injected (bug: blew up
+            // token budgets for agents like Mira with no MCP needs).
             let mcp_candidates: Vec<ToolDefinition> = if mcp_allowlist.is_empty() {
-                mcp_tools.iter().cloned().collect()
+                Vec::new()
             } else {
                 let normalized: Vec<String> = mcp_allowlist
                     .iter()
@@ -5789,6 +5791,12 @@ impl OpenFangKernel {
     /// Build a compact MCP server/tool summary for the system prompt so the
     /// agent knows what external tool servers are connected.
     fn build_mcp_summary(&self, mcp_allowlist: &[String]) -> String {
+        // Empty allowlist → agent has no MCP servers → no summary text.
+        // This prevents MCP tool descriptions from leaking into the system
+        // prompt of agents that did not opt in (was token budget waste).
+        if mcp_allowlist.is_empty() {
+            return String::new();
+        }
         let tools = match self.mcp_tools.lock() {
             Ok(t) => t.clone(),
             Err(_) => return String::new(),
@@ -5811,8 +5819,7 @@ impl OpenFangKernel {
             let parts: Vec<&str> = tool.name.splitn(3, '_').collect();
             if parts.len() >= 3 && parts[0] == "mcp" {
                 let server = parts[1].to_string();
-                // Filter by MCP allowlist if set
-                if !mcp_allowlist.is_empty() && !normalized.iter().any(|n| n == &server) {
+                if !normalized.iter().any(|n| n == &server) {
                     continue;
                 }
                 servers
